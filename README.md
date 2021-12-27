@@ -1,4 +1,4 @@
-###Temporary Repository
+### Temporary Repository
 
 This is just a test repository based on [this ECDSA branch](https://github.com/tmpfs/multi-party-ecdsa/tree/curv-0.8)
 to demonstrate an issue in the implementation of MtA (Multiplicative to Additive) share conversion protocol
