@@ -11,7 +11,7 @@
 
 use curv::arithmetic::traits::*;
 use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
-use curv::elliptic::curves::{secp256_k1::Secp256k1, Point, Scalar};
+use curv::elliptic::curves::{Curve, Point, Scalar};
 use curv::BigInt;
 use sha2::Sha256;
 
@@ -102,7 +102,7 @@ pub struct AliceProof {
 
 impl AliceProof {
     /// verify Alice's proof using the proof and public keys
-    pub fn verify(
+    pub fn verify<E: Curve>(
         &self,
         cipher: &BigInt,
         alice_ek: &EncryptionKey,
@@ -115,7 +115,7 @@ impl AliceProof {
         let h2 = &dlog_statement.ni;
         let Gen = alice_ek.n.borrow() + 1;
 
-        if self.s1 > Scalar::<Secp256k1>::group_order().pow(3) {
+        if self.s1 > Scalar::<E>::group_order().pow(3) {
             return false;
         }
 
@@ -157,7 +157,7 @@ impl AliceProof {
     /// Create the proof using Alice's Paillier private keys and public ZKP setup.
     /// Requires randomness used for encrypting Alice's secret a.
     /// It is assumed that secp256k1 curve is used.
-    pub fn generate(
+    pub fn generate<E: Curve>(
         a: &BigInt,
         cipher: &BigInt,
         alice_ek: &EncryptionKey,
@@ -168,7 +168,7 @@ impl AliceProof {
             alice_ek,
             dlog_statement,
             a,
-            Scalar::<Secp256k1>::group_order(),
+            Scalar::<E>::group_order(),
         );
 
         let Gen = alice_ek.n.borrow() + 1;
@@ -215,10 +215,10 @@ impl BobZkpRound1 {
     /// `b` - Bob's secret
     /// `beta_prim`  - randomly chosen in `MtA` by Bob
     /// `a_encrypted` - Alice's secret encrypted by Alice
-    fn from(
+    fn from<E: Curve>(
         alice_ek: &EncryptionKey,
         dlog_statement: &DLogStatement,
-        b: &Scalar<Secp256k1>,
+        b: &Scalar<E>,
         beta_prim: &BigInt,
         a_encrypted: &BigInt,
         q: &BigInt,
@@ -278,11 +278,11 @@ impl BobZkpRound2 {
     /// `b` - Bob's secret
     /// `beta_prim` - randomly chosen in `MtA` by Bob
     /// `r` - randomness used by Bob on  Alice's public Paillier key to encrypt `beta_prim` in `MtA`
-    fn from(
+    fn from<E: Curve>(
         alice_ek: &EncryptionKey,
         round1: &BobZkpRound1,
         e: &BigInt,
-        b: &Scalar<Secp256k1>,
+        b: &Scalar<E>,
         beta_prim: &BigInt,
         r: &Randomness,
     ) -> Self {
@@ -298,9 +298,9 @@ impl BobZkpRound2 {
 }
 
 /// Additional fields in Bob's proof if MtA is run with check
-pub struct BobCheck {
-    u: Point<Secp256k1>,
-    X: Point<Secp256k1>,
+pub struct BobCheck<E: Curve> {
+    u: Point<E>,
+    X: Point<E>,
 }
 
 /// Bob's regular proof
@@ -318,13 +318,13 @@ pub struct BobProof {
 
 #[allow(clippy::too_many_arguments)]
 impl BobProof {
-    pub fn verify(
+    pub fn verify<E: Curve>(
         &self,
         a_enc: &BigInt,
         mta_avc_out: &BigInt,
         alice_ek: &EncryptionKey,
         dlog_statement: &DLogStatement,
-        check: Option<&BobCheck>,
+        check: Option<&BobCheck<E>>,
     ) -> bool {
         let N = &alice_ek.n;
         let NN = &alice_ek.nn;
@@ -332,7 +332,7 @@ impl BobProof {
         let h1 = &dlog_statement.g;
         let h2 = &dlog_statement.ni;
 
-        if self.s1 > Scalar::<Secp256k1>::group_order().pow(3) {
+        if self.s1 > Scalar::<E>::group_order().pow(3) {
             return false;
         }
 
@@ -411,23 +411,23 @@ impl BobProof {
         true
     }
 
-    pub fn generate(
+    pub fn generate<E: Curve>(
         a_encrypted: &BigInt,
         mta_encrypted: &BigInt,
-        b: &Scalar<Secp256k1>,
+        b: &Scalar<E>,
         beta_prim: &BigInt,
         alice_ek: &EncryptionKey,
         dlog_statement: &DLogStatement,
         r: &Randomness,
         check: bool,
-    ) -> (BobProof, Option<Point<Secp256k1>>) {
+    ) -> (BobProof, Option<Point<E>>) {
         let round1 = BobZkpRound1::from(
             alice_ek,
             dlog_statement,
             b,
             beta_prim,
             a_encrypted,
-            Scalar::<Secp256k1>::group_order(),
+            Scalar::<E>::group_order(),
         );
 
         let Gen = alice_ek.n.borrow() + 1;
@@ -446,7 +446,7 @@ impl BobProof {
         let e = if check {
             let (X, u) = {
                 let ec_gen = Point::generator();
-                let alpha = Scalar::<Secp256k1>::from(&round1.alpha);
+                let alpha = Scalar::<E>::from(&round1.alpha);
                 (ec_gen * b, ec_gen * alpha)
             };
             check_u = Some(u.clone());
@@ -489,20 +489,20 @@ impl BobProof {
 
 /// Bob's extended proof, adds the knowledge of $`B = g^b \in \mathcal{G}`$
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct BobProofExt {
+pub struct BobProofExt<E: Curve> {
     proof: BobProof,
-    u: Point<Secp256k1>,
+    u: Point<E>,
 }
 
 #[allow(clippy::too_many_arguments)]
-impl BobProofExt {
+impl<E: Curve> BobProofExt<E> {
     pub fn verify(
         &self,
         a_enc: &BigInt,
         mta_avc_out: &BigInt,
         alice_ek: &EncryptionKey,
         dlog_statement: &DLogStatement,
-        X: &Point<Secp256k1>,
+        X: &Point<E>,
     ) -> bool {
         // check basic proof first
         if !self.proof.verify(
@@ -521,8 +521,8 @@ impl BobProofExt {
         // fiddle with EC points
         let (x1, x2) = {
             let ec_gen = Point::generator();
-            let s1 = Scalar::<Secp256k1>::from(&self.proof.s1);
-            let e = Scalar::<Secp256k1>::from(&self.proof.e);
+            let s1 = Scalar::<E>::from(&self.proof.s1);
+            let e = Scalar::<E>::from(&self.proof.e);
             (ec_gen * s1, (X * &e) + &self.u)
         };
 
@@ -557,20 +557,22 @@ impl SampleFromMultiplicativeGroup for BigInt {
 }
 
 #[cfg(test)]
+#[generic_tests::define]
 pub(crate) mod tests {
     use super::*;
     use paillier::traits::{Encrypt, EncryptWithChosenRandomness, KeyGeneration};
     use paillier::{Add, DecryptionKey, Mul, Paillier, RawCiphertext, RawPlaintext};
+    use crate::test_for_all_curves;
 
-    fn generate(
+    fn generate<E: Curve>(
         a_encrypted: &BigInt,
         mta_encrypted: &BigInt,
-        b: &Scalar<Secp256k1>,
+        b: &Scalar<E>,
         beta_prim: &BigInt,
         alice_ek: &EncryptionKey,
         dlog_statement: &DLogStatement,
         r: &Randomness,
-    ) -> BobProofExt {
+    ) -> BobProofExt<E> {
         // proving a basic proof (with modified hash)
         let (bob_proof, u) = BobProof::generate(
             a_encrypted,
@@ -612,12 +614,13 @@ pub(crate) mod tests {
         (dlog_statement, ek, dk)
     }
 
-    #[test]
-    fn alice_zkp() {
+    #[cfg(test)]
+    test_for_all_curves!(alice_zkp);
+    fn alice_zkp<E: Curve>() {
         let (dlog_statement, ek, _) = generate_init();
 
         // Alice's secret value
-        let a = Scalar::<Secp256k1>::random().to_bigint();
+        let a = Scalar::<E>::random().to_bigint();
         let r = BigInt::from_paillier_key(&ek);
         let cipher = Paillier::encrypt_with_chosen_randomness(
             &ek,
@@ -628,13 +631,14 @@ pub(crate) mod tests {
         .clone()
         .into_owned();
 
-        let alice_proof = AliceProof::generate(&a, &cipher, &ek, &dlog_statement, &r);
+        let alice_proof = AliceProof::generate::<E>(&a, &cipher, &ek, &dlog_statement, &r);
 
-        assert!(alice_proof.verify(&cipher, &ek, &dlog_statement));
+        assert!(alice_proof.verify::<E>(&cipher, &ek, &dlog_statement));
     }
 
-    #[test]
-    fn bob_zkp() {
+    #[cfg(test)]
+    test_for_all_curves!(bob_zkp);
+    fn bob_zkp<E: Curve>() {
         let (dlog_statement, ek, _) = generate_init();
 
         (0..5).for_each(|_| {
@@ -643,14 +647,14 @@ pub(crate) mod tests {
             // run MtA protocol with different inputs
             (0..5).for_each(|_| {
                 // Simulate Alice
-                let a = Scalar::<Secp256k1>::random().to_bigint();
+                let a = Scalar::<E>::random().to_bigint();
                 let encrypted_a = Paillier::encrypt(alice_public_key, RawPlaintext::from(a))
                     .0
                     .clone()
                     .into_owned();
 
                 // Bob follows MtA
-                let b = Scalar::<Secp256k1>::random();
+                let b = Scalar::<E>::random();
                 // E(a) * b
                 let b_times_enc_a = Paillier::mul(
                     alice_public_key,
@@ -677,7 +681,7 @@ pub(crate) mod tests {
                     &r,
                     false,
                 );
-                assert!(bob_proof.verify(
+                assert!(bob_proof.verify::<E>(
                     &encrypted_a,
                     &mta_out.0.clone().into_owned(),
                     alice_public_key,
